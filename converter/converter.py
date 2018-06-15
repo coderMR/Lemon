@@ -4,13 +4,18 @@
 import os
 import re
 
+# 不进行转换的头文件列表
+uncvt_list = ['MTLFence', 'UITextInputTraits', 'UIUserNotificationSettings', 'NSURL', 'MTLCommandQueue', 'UIPopoverController', 'UITextDragging', 'MTLTexture']
+
 lemon_frameworks = '../lemon_frameworks'
+lemon_properties = '../lemon_frameworks/lemon_properties'
 
 def get_frameworks():
     Frameworks = input('请键入Framework的路径:')
     if os.path.exists(Frameworks):
         if not os.path.exists(lemon_frameworks):
             os.mkdir(lemon_frameworks)
+            os.mkdir(lemon_properties)
         frameworks = os.listdir(Frameworks)
         for framework in frameworks:
             convert_framework(Frameworks, framework) 
@@ -28,6 +33,11 @@ def convert_framework(Frameworks, framework):
 def convert_header(Headers, header):
     # 头文件path
     header = Headers + '/' + header
+    
+    # 判断是否在'不转换列表'中
+    class_name = re.match(r'^.*[/]([^/]+)[.][h]$', header).group(1)
+    if class_name in uncvt_list:
+        return
 
     # 创建'读者'
     reader = get_reader(header)
@@ -38,25 +48,26 @@ def convert_header(Headers, header):
         return
 
     # 创建'写者'
-    class_name = re.match(r'^.*[/]([^/]+)[.][h]$', header).group(1)
     header_writer = get_header_writer(class_name)
     def_writer = get_def_writer(class_name)
+    
+    # 抓取库名称
+    Kit = re.match(r'^.*/([^/]+)[.]framework.*$', Headers).group(1)
 
     # 写入category.h
-    write_header(header_writer, class_name, properties)
+    write_header(header_writer, Kit, class_name, properties)
 
     # 写入category.m
     write_def(def_writer, class_name, properties)
-
 
 def get_reader(header):
     return open(header, 'r')
 
 def get_header_writer(class_name):
-    return open('{0}/{1}+Property.h'.format(lemon_frameworks, class_name), 'w')
+    return open('{0}/{1}+Property.h'.format(lemon_properties, class_name), 'w')
 
 def get_def_writer(class_name):
-    return open('{0}/{1}+Property.m'.format(lemon_frameworks, class_name), 'w')
+    return open('{0}/{1}+Property.m'.format(lemon_properties, class_name), 'w')
 
 def get_properties(reader):
     # 提取所有文本
@@ -76,8 +87,11 @@ def get_properties(reader):
     # names 用于过滤category中重复的属性名
     names = [] 
 
+    # 用于存储 导入文件
+    imports = []
     # 用于储存"属性" 结果：key-value
     properties = [] 
+
     for line in lines: 
         # 匹配属性
         mat = re.match(r'^@property\s*[^)]+[)]\s*(\S+)\s+(\S+)\s*.*[;].*\n$', line)
@@ -91,6 +105,12 @@ def get_properties(reader):
             # 提取 type  name
             item_type = mat.group(1)
             item_name = mat.group(2)
+            
+            # 去除错误property
+            if item_name.find('(') != -1:
+                continue
+            if len(item_name) == 0:
+                continue
             
             # 过滤重复property
             if item_name in names: 
@@ -106,9 +126,8 @@ def get_properties(reader):
 
     return properties
 
-
-def write_header(header_writer, class_name, properties):
-    header_writer.write('#import <UIKit/UIKit.h>\n\n')
+def write_header(header_writer, Kit, class_name, properties):
+    header_writer.write('#import <{0}/{1}.h>\n\n'.format(Kit, class_name))
     header_writer.write('@interface {0} (Property)\n\n'.format(class_name))
     header_writer.write('+ (instancetype)instance;\n\n')
     for key_value in properties:
@@ -139,8 +158,8 @@ def write_def(def_writer, class_name, properties):
     def_writer.close()
 
 def write_import_lead():
-    writer = open('{0}/lemon_property.h'.format(lemon_frameworks), 'w')
-    headers = os.listdir(lemon_frameworks)
+    writer = open('{0}/lemon_property.h'.format(lemon_properties), 'w')
+    headers = os.listdir(lemon_properties)
     for header in headers:
         if header.endswith('h'):
             writer.write('#import "{0}"\n'.format(header))
